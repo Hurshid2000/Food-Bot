@@ -1,99 +1,111 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
 
-const db = new Database(path.join(__dirname, '../../data.db'));
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Helper: run a query and return rows
+async function query(text, params) {
+  const result = await pool.query(text, params);
+  return result.rows;
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
-    telegram_id INTEGER UNIQUE NOT NULL,
-    username TEXT,
-    first_name TEXT,
-    last_name TEXT,
-    phone TEXT,
-    role TEXT DEFAULT 'user' CHECK(role IN ('user', 'admin', 'cook', 'super_admin')),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+// Helper: run a query and return first row
+async function queryOne(text, params) {
+  const result = await pool.query(text, params);
+  return result.rows[0] || null;
+}
 
-  CREATE TABLE IF NOT EXISTS locations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    address TEXT NOT NULL,
-    is_default INTEGER DEFAULT 0,
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id)
-  );
+// Helper: run a query and return result (for INSERT/UPDATE/DELETE)
+async function execute(text, params) {
+  const result = await pool.query(text, params);
+  return result;
+}
 
-  CREATE TABLE IF NOT EXISTS menu_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT,
-    price REAL NOT NULL,
-    photo_id TEXT,
-    calories INTEGER,
-    proteins REAL,
-    fats REAL,
-    carbs REAL,
-    is_active INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+// Initialize tables
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      telegram_id BIGINT UNIQUE NOT NULL,
+      username TEXT,
+      first_name TEXT,
+      last_name TEXT,
+      phone TEXT,
+      role TEXT DEFAULT 'user' CHECK(role IN ('user', 'admin', 'cook', 'super_admin')),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
 
-  CREATE TABLE IF NOT EXISTS daily_menu (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    menu_item_id INTEGER NOT NULL,
-    date TEXT NOT NULL,
-    available_qty INTEGER DEFAULT 0,
-    FOREIGN KEY (menu_item_id) REFERENCES menu_items(id),
-    UNIQUE(menu_item_id, date)
-  );
+    CREATE TABLE IF NOT EXISTS locations (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(telegram_id),
+      name TEXT NOT NULL,
+      address TEXT NOT NULL,
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
+      is_default BOOLEAN DEFAULT FALSE
+    );
 
-  CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    location_id INTEGER,
-    status TEXT DEFAULT 'new' CHECK(status IN ('new', 'confirmed', 'cooking', 'ready', 'delivered', 'cancelled')),
-    total REAL DEFAULT 0,
-    note TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id),
-    FOREIGN KEY (location_id) REFERENCES locations(id)
-  );
+    CREATE TABLE IF NOT EXISTS menu_items (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      price DOUBLE PRECISION NOT NULL,
+      photo_id TEXT,
+      calories INTEGER,
+      proteins DOUBLE PRECISION,
+      fats DOUBLE PRECISION,
+      carbs DOUBLE PRECISION,
+      is_daily BOOLEAN DEFAULT FALSE,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
 
-  CREATE TABLE IF NOT EXISTS order_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id INTEGER NOT NULL,
-    menu_item_id INTEGER NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    price REAL NOT NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(id),
-    FOREIGN KEY (menu_item_id) REFERENCES menu_items(id)
-  );
+    CREATE TABLE IF NOT EXISTS daily_menu (
+      id SERIAL PRIMARY KEY,
+      menu_item_id INTEGER NOT NULL REFERENCES menu_items(id),
+      date DATE NOT NULL,
+      UNIQUE(menu_item_id, date)
+    );
 
-  CREATE TABLE IF NOT EXISTS reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    order_id INTEGER NOT NULL,
-    menu_item_id INTEGER NOT NULL,
-    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
-    comment TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id),
-    FOREIGN KEY (order_id) REFERENCES orders(id),
-    FOREIGN KEY (menu_item_id) REFERENCES menu_items(id)
-  );
+    CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(telegram_id),
+      location_id INTEGER REFERENCES locations(id),
+      status TEXT DEFAULT 'new' CHECK(status IN ('new', 'confirmed', 'cooking', 'ready', 'delivered', 'cancelled')),
+      total DOUBLE PRECISION DEFAULT 0,
+      note TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
 
-  CREATE TABLE IF NOT EXISTS cart (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    daily_menu_id INTEGER NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id),
-    FOREIGN KEY (daily_menu_id) REFERENCES daily_menu(id),
-    UNIQUE(user_id, daily_menu_id)
-  );
-`);
+    CREATE TABLE IF NOT EXISTS order_items (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES orders(id),
+      menu_item_id INTEGER NOT NULL REFERENCES menu_items(id),
+      quantity INTEGER DEFAULT 1,
+      price DOUBLE PRECISION NOT NULL
+    );
 
-module.exports = db;
+    CREATE TABLE IF NOT EXISTS reviews (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(telegram_id),
+      order_id INTEGER NOT NULL REFERENCES orders(id),
+      menu_item_id INTEGER NOT NULL REFERENCES menu_items(id),
+      rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+      comment TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS cart (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(telegram_id),
+      menu_item_id INTEGER NOT NULL REFERENCES menu_items(id),
+      quantity INTEGER DEFAULT 1,
+      UNIQUE(user_id, menu_item_id)
+    );
+  `);
+  console.log('Database initialized.');
+}
+
+module.exports = { pool, query, queryOne, execute, initDB };

@@ -4,10 +4,10 @@ const Order = require('../models/order');
 const { mainKeyboard } = require('../keyboards/main');
 
 function setupReviewsHandler(bot) {
-  bot.action(/^review_order_(\d+)$/, (ctx) => {
+  bot.action(/^review_order_(\d+)$/, async (ctx) => {
     ctx.answerCbQuery();
     const orderId = parseInt(ctx.match[1]);
-    const order = Order.getWithItems(orderId);
+    const order = await Order.getWithItems(orderId);
 
     if (!order || order.status !== 'delivered') {
       return ctx.reply('Отзыв можно оставить только на доставленный заказ.');
@@ -22,12 +22,13 @@ function setupReviewsHandler(bot) {
     ctx.reply('Выберите блюдо для отзыва:', Markup.inlineKeyboard(buttons));
   });
 
-  bot.action(/^review_item_(\d+)_(\d+)$/, (ctx) => {
+  bot.action(/^review_item_(\d+)_(\d+)$/, async (ctx) => {
     ctx.answerCbQuery();
     const orderId = parseInt(ctx.match[1]);
     const menuItemId = parseInt(ctx.match[2]);
 
-    if (Review.hasReviewed(ctx.from.id, orderId, menuItemId)) {
+    const existing = await Review.hasReviewed(ctx.from.id, orderId, menuItemId);
+    if (existing) {
       return ctx.reply('Вы уже оставили отзыв на это блюдо.');
     }
 
@@ -64,13 +65,13 @@ function setupReviewsHandler(bot) {
     ctx.reply('Напишите комментарий (или "-" чтобы пропустить):');
   });
 
-  bot.on('message', (ctx, next) => {
+  bot.on('message', async (ctx, next) => {
     const pending = bot.context?.[ctx.from.id];
     if (!pending || pending.action !== 'add_review' || pending.step !== 'comment') return next();
 
     const comment = ctx.message.text === '-' ? null : ctx.message.text;
 
-    Review.add(ctx.from.id, pending.orderId, pending.menuItemId, pending.rating, comment);
+    await Review.add(ctx.from.id, pending.orderId, pending.menuItemId, pending.rating, comment);
     delete bot.context[ctx.from.id];
 
     ctx.reply('Спасибо за отзыв!', mainKeyboard(ctx.state.user.role));

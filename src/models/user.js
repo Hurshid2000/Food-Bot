@@ -1,40 +1,40 @@
-const db = require('./database');
+const { query, queryOne, execute } = require('./database');
 
 const User = {
-  findOrCreate(telegramUser) {
-    const existing = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramUser.id);
+  async findOrCreate(telegramUser) {
+    const existing = await queryOne('SELECT * FROM users WHERE telegram_id = $1', [telegramUser.id]);
     if (existing) return existing;
 
-    db.prepare(`
-      INSERT INTO users (telegram_id, username, first_name, last_name)
-      VALUES (?, ?, ?, ?)
-    `).run(telegramUser.id, telegramUser.username, telegramUser.first_name, telegramUser.last_name);
+    await execute(
+      'INSERT INTO users (telegram_id, username, first_name, last_name) VALUES ($1, $2, $3, $4)',
+      [telegramUser.id, telegramUser.username, telegramUser.first_name, telegramUser.last_name]
+    );
 
-    return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramUser.id);
+    return await queryOne('SELECT * FROM users WHERE telegram_id = $1', [telegramUser.id]);
   },
 
-  findByTelegramId(telegramId) {
-    return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId);
+  async findByTelegramId(telegramId) {
+    return await queryOne('SELECT * FROM users WHERE telegram_id = $1', [telegramId]);
   },
 
-  setRole(telegramId, role) {
-    return db.prepare('UPDATE users SET role = ? WHERE telegram_id = ?').run(role, telegramId);
+  async setRole(telegramId, role) {
+    return await execute('UPDATE users SET role = $1 WHERE telegram_id = $2', [role, telegramId]);
   },
 
-  setPhone(telegramId, phone) {
-    return db.prepare('UPDATE users SET phone = ? WHERE telegram_id = ?').run(phone, telegramId);
+  async setPhone(telegramId, phone) {
+    return await execute('UPDATE users SET phone = $1 WHERE telegram_id = $2', [phone, telegramId]);
   },
 
-  getAllAdmins() {
-    return db.prepare("SELECT * FROM users WHERE role IN ('admin', 'super_admin')").all();
+  async getAllAdmins() {
+    return await query("SELECT * FROM users WHERE role IN ('admin', 'super_admin')");
   },
 
-  getAllCooks() {
-    return db.prepare("SELECT * FROM users WHERE role = 'cook'").all();
+  async getAllCooks() {
+    return await query("SELECT * FROM users WHERE role = 'cook'");
   },
 
-  getAll() {
-    return db.prepare('SELECT * FROM users ORDER BY created_at DESC').all();
+  async getAll() {
+    return await query('SELECT * FROM users ORDER BY created_at DESC');
   }
 };
 

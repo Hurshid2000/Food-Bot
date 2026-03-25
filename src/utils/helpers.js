@@ -32,4 +32,27 @@ function formatNutrition(item) {
   return parts.length ? parts.join(' | ') : '';
 }
 
-module.exports = { getToday, formatDate, formatPrice, formatOrderStatus, formatNutrition };
+function getNextWorkdays(count = 3) {
+  const days = [];
+  const d = new Date();
+  while (days.length < count) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow >= 1 && dow <= 5) {
+      days.push(d.toISOString().split('T')[0]);
+    }
+  }
+  return days;
+}
+
+function isWorkday(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const dow = d.getDay();
+  return dow >= 1 && dow <= 5;
+}
+
+function isTodayWorkday() {
+  return isWorkday(getToday());
+}
+
+module.exports = { getToday, formatDate, formatPrice, formatOrderStatus, formatNutrition, getNextWorkdays, isWorkday, isTodayWorkday };

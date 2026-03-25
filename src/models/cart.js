@@ -1,43 +1,45 @@
-const db = require('./database');
+const { query, queryOne, execute } = require('./database');
 
 const Cart = {
-  addItem(userId, dailyMenuId, quantity = 1) {
-    return db.prepare(`
-      INSERT INTO cart (user_id, daily_menu_id, quantity) VALUES (?, ?, ?)
-      ON CONFLICT(user_id, daily_menu_id) DO UPDATE SET quantity = quantity + ?
-    `).run(userId, dailyMenuId, quantity, quantity);
+  async addItem(userId, menuItemId, quantity = 1) {
+    return await execute(
+      `INSERT INTO cart (user_id, menu_item_id, quantity) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, menu_item_id) DO UPDATE SET quantity = cart.quantity + $3`,
+      [userId, menuItemId, quantity]
+    );
   },
 
-  updateQty(userId, dailyMenuId, quantity) {
+  async updateQty(userId, menuItemId, quantity) {
     if (quantity <= 0) {
-      return db.prepare('DELETE FROM cart WHERE user_id = ? AND daily_menu_id = ?').run(userId, dailyMenuId);
+      return await execute('DELETE FROM cart WHERE user_id = $1 AND menu_item_id = $2', [userId, menuItemId]);
     }
-    return db.prepare('UPDATE cart SET quantity = ? WHERE user_id = ? AND daily_menu_id = ?').run(quantity, userId, dailyMenuId);
+    return await execute('UPDATE cart SET quantity = $1 WHERE user_id = $2 AND menu_item_id = $3', [quantity, userId, menuItemId]);
   },
 
-  getCart(userId) {
-    return db.prepare(`
-      SELECT c.*, dm.date, dm.available_qty, mi.name, mi.price, mi.photo_id,
-             mi.calories, mi.proteins, mi.fats, mi.carbs
-      FROM cart c
-      JOIN daily_menu dm ON c.daily_menu_id = dm.id
-      JOIN menu_items mi ON dm.menu_item_id = mi.id
-      WHERE c.user_id = ?
-    `).all(userId);
+  async getCart(userId) {
+    return await query(
+      `SELECT c.*, mi.name, mi.price, mi.photo_id,
+              mi.calories, mi.proteins, mi.fats, mi.carbs
+       FROM cart c
+       JOIN menu_items mi ON c.menu_item_id = mi.id
+       WHERE c.user_id = $1`,
+      [userId]
+    );
   },
 
-  clear(userId) {
-    return db.prepare('DELETE FROM cart WHERE user_id = ?').run(userId);
+  async clear(userId) {
+    return await execute('DELETE FROM cart WHERE user_id = $1', [userId]);
   },
 
-  getTotal(userId) {
-    return db.prepare(`
-      SELECT COALESCE(SUM(c.quantity * mi.price), 0) as total
-      FROM cart c
-      JOIN daily_menu dm ON c.daily_menu_id = dm.id
-      JOIN menu_items mi ON dm.menu_item_id = mi.id
-      WHERE c.user_id = ?
-    `).get(userId);
+  async getTotal(userId) {
+    const result = await queryOne(
+      `SELECT COALESCE(SUM(c.quantity * mi.price), 0) as total
+       FROM cart c
+       JOIN menu_items mi ON c.menu_item_id = mi.id
+       WHERE c.user_id = $1`,
+      [userId]
+    );
+    return result;
   }
 };
 

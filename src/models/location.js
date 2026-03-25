@@ -1,32 +1,33 @@
-const db = require('./database');
+const { query, queryOne, execute } = require('./database');
 
 const Location = {
-  add(userId, name, address) {
-    const result = db.prepare(`
-      INSERT INTO locations (user_id, name, address) VALUES (?, ?, ?)
-    `).run(userId, name, address);
-    return result.lastInsertRowid;
+  async add(userId, name, address, latitude, longitude) {
+    const result = await queryOne(
+      'INSERT INTO locations (user_id, name, address, latitude, longitude) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [userId, name, address, latitude || null, longitude || null]
+    );
+    return result.id;
   },
 
-  getUserLocations(userId) {
-    return db.prepare('SELECT * FROM locations WHERE user_id = ?').all(userId);
+  async getUserLocations(userId) {
+    return await query('SELECT * FROM locations WHERE user_id = $1', [userId]);
   },
 
-  getById(id) {
-    return db.prepare('SELECT * FROM locations WHERE id = ?').get(id);
+  async getById(id) {
+    return await queryOne('SELECT * FROM locations WHERE id = $1', [id]);
   },
 
-  setDefault(userId, locationId) {
-    db.prepare('UPDATE locations SET is_default = 0 WHERE user_id = ?').run(userId);
-    db.prepare('UPDATE locations SET is_default = 1 WHERE id = ? AND user_id = ?').run(locationId, userId);
+  async setDefault(userId, locationId) {
+    await execute('UPDATE locations SET is_default = FALSE WHERE user_id = $1', [userId]);
+    await execute('UPDATE locations SET is_default = TRUE WHERE id = $1 AND user_id = $2', [locationId, userId]);
   },
 
-  getDefault(userId) {
-    return db.prepare('SELECT * FROM locations WHERE user_id = ? AND is_default = 1').get(userId);
+  async getDefault(userId) {
+    return await queryOne('SELECT * FROM locations WHERE user_id = $1 AND is_default = TRUE', [userId]);
   },
 
-  delete(id, userId) {
-    return db.prepare('DELETE FROM locations WHERE id = ? AND user_id = ?').run(id, userId);
+  async delete(id, userId) {
+    return await execute('DELETE FROM locations WHERE id = $1 AND user_id = $2', [id, userId]);
   }
 };
 

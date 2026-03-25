@@ -1,52 +1,51 @@
 const { Markup } = require('telegraf');
 const Cart = require('../models/cart');
 const Order = require('../models/order');
-const Menu = require('../models/menu');
 const Location = require('../models/location');
 const { formatPrice } = require('../utils/helpers');
 const { mainKeyboard } = require('../keyboards/main');
 
 function setupCartHandler(bot) {
-  bot.hears('Корзина', (ctx) => {
-    showCart(ctx);
+  bot.hears('Корзина', async (ctx) => {
+    await showCart(ctx);
   });
 
-  bot.action('show_cart', (ctx) => {
+  bot.action('show_cart', async (ctx) => {
     ctx.answerCbQuery();
-    showCart(ctx);
+    await showCart(ctx);
   });
 
-  bot.action(/^cart_plus_(\d+)$/, (ctx) => {
-    const dailyMenuId = parseInt(ctx.match[1]);
-    Cart.addItem(ctx.from.id, dailyMenuId, 1);
+  bot.action(/^cart_plus_(\d+)$/, async (ctx) => {
+    const menuItemId = parseInt(ctx.match[1]);
+    await Cart.addItem(ctx.from.id, menuItemId, 1);
     ctx.answerCbQuery('Добавлено');
-    showCart(ctx);
+    await showCart(ctx);
   });
 
-  bot.action(/^cart_minus_(\d+)$/, (ctx) => {
-    const dailyMenuId = parseInt(ctx.match[1]);
-    const cartItems = Cart.getCart(ctx.from.id);
-    const item = cartItems.find(i => i.daily_menu_id === dailyMenuId);
+  bot.action(/^cart_minus_(\d+)$/, async (ctx) => {
+    const menuItemId = parseInt(ctx.match[1]);
+    const cartItems = await Cart.getCart(ctx.from.id);
+    const item = cartItems.find(i => i.menu_item_id === menuItemId);
     if (item) {
-      Cart.updateQty(ctx.from.id, dailyMenuId, item.quantity - 1);
+      await Cart.updateQty(ctx.from.id, menuItemId, item.quantity - 1);
     }
     ctx.answerCbQuery('Убрано');
-    showCart(ctx);
+    await showCart(ctx);
   });
 
-  bot.action('cart_clear', (ctx) => {
-    Cart.clear(ctx.from.id);
+  bot.action('cart_clear', async (ctx) => {
+    await Cart.clear(ctx.from.id);
     ctx.answerCbQuery('Корзина очищена');
     ctx.reply('Корзина очищена.', mainKeyboard(ctx.state.user.role));
   });
 
   // Checkout
-  bot.action('cart_checkout', (ctx) => {
+  bot.action('cart_checkout', async (ctx) => {
     ctx.answerCbQuery();
-    const cartItems = Cart.getCart(ctx.from.id);
+    const cartItems = await Cart.getCart(ctx.from.id);
     if (!cartItems.length) return ctx.reply('Корзина пуста.');
 
-    const locations = Location.getUserLocations(ctx.from.id);
+    const locations = await Location.getUserLocations(ctx.from.id);
 
     if (!locations.length) {
       bot.context = bot.context || {};
@@ -62,10 +61,10 @@ function setupCartHandler(bot) {
     ctx.reply('Выберите адрес доставки:', Markup.inlineKeyboard(buttons));
   });
 
-  bot.action(/^checkout_loc_(\d+)$/, (ctx) => {
+  bot.action(/^checkout_loc_(\d+)$/, async (ctx) => {
     ctx.answerCbQuery();
     const locationId = parseInt(ctx.match[1]);
-    processOrder(ctx, bot, locationId);
+    await processOrder(ctx, bot, locationId);
   });
 
   bot.action('checkout_new_loc', (ctx) => {
@@ -75,17 +74,15 @@ function setupCartHandler(bot) {
     ctx.reply('Введите название места (например "Офис"):');
   });
 
-  // Note before final confirm
-  bot.action(/^order_confirm_(\d+)$/, (ctx) => {
+  // Confirm order
+  bot.action(/^order_confirm_(\d+)$/, async (ctx) => {
     ctx.answerCbQuery();
     const orderId = parseInt(ctx.match[1]);
-    const order = Order.getWithItems(orderId);
+    const order = await Order.getWithItems(orderId);
     if (!order) return ctx.reply('Заказ не найден.');
 
-    Order.setStatus(orderId, 'confirmed');
-
-    // Notify cook
-    notifyCook(ctx, bot, order);
+    await Order.setStatus(orderId, 'confirmed');
+    await notifyCook(ctx, bot, order);
 
     ctx.reply(
       `Заказ #${orderId} оформлен! Оплата при получении.\nОжидайте — повар начнёт готовить.`,
@@ -93,15 +90,15 @@ function setupCartHandler(bot) {
     );
   });
 
-  bot.action(/^order_cancel_(\d+)$/, (ctx) => {
+  bot.action(/^order_cancel_(\d+)$/, async (ctx) => {
     ctx.answerCbQuery();
     const orderId = parseInt(ctx.match[1]);
-    Order.setStatus(orderId, 'cancelled');
+    await Order.setStatus(orderId, 'cancelled');
     ctx.reply(`Заказ #${orderId} отменён.`, mainKeyboard(ctx.state.user.role));
   });
 
   // Message handler for checkout flow
-  bot.on('message', (ctx, next) => {
+  bot.on('message', async (ctx, next) => {
     const pending = bot.context?.[ctx.from.id];
     if (!pending || pending.action !== 'checkout_new_location') return next();
 
@@ -110,15 +107,15 @@ function setupCartHandler(bot) {
       pending.step = 'address';
       ctx.reply('Введите адрес доставки:');
     } else if (pending.step === 'address') {
-      const locId = Location.add(ctx.from.id, pending.locationName, ctx.message.text);
+      const locId = await Location.add(ctx.from.id, pending.locationName, ctx.message.text);
       delete bot.context[ctx.from.id];
-      processOrder(ctx, bot, locId);
+      await processOrder(ctx, bot, locId);
     }
   });
 }
 
-function showCart(ctx) {
-  const items = Cart.getCart(ctx.from.id);
+async function showCart(ctx) {
+  const items = await Cart.getCart(ctx.from.id);
   if (!items.length) {
     return ctx.reply('Корзина пуста. Загляните в "Меню на сегодня"!');
   }
@@ -129,13 +126,13 @@ function showCart(ctx) {
   items.forEach(item => {
     text += `<b>${item.name}</b> x${item.quantity} = ${formatPrice(item.price * item.quantity)}\n`;
     buttons.push([
-      Markup.button.callback(`➖`, `cart_minus_${item.daily_menu_id}`),
-      Markup.button.callback(`${item.name}: ${item.quantity}`, `noop`),
-      Markup.button.callback(`➕`, `cart_plus_${item.daily_menu_id}`)
+      Markup.button.callback('➖', `cart_minus_${item.menu_item_id}`),
+      Markup.button.callback(`${item.name}: ${item.quantity}`, 'noop'),
+      Markup.button.callback('➕', `cart_plus_${item.menu_item_id}`)
     ]);
   });
 
-  const { total } = Cart.getTotal(ctx.from.id);
+  const { total } = await Cart.getTotal(ctx.from.id);
   text += `\n<b>Итого: ${formatPrice(total)}</b>`;
 
   buttons.push([
@@ -146,30 +143,21 @@ function showCart(ctx) {
   ctx.reply(text, { parse_mode: 'HTML', ...Markup.inlineKeyboard(buttons) });
 }
 
-function processOrder(ctx, bot, locationId) {
-  const cartItems = Cart.getCart(ctx.from.id);
+async function processOrder(ctx, bot, locationId) {
+  const cartItems = await Cart.getCart(ctx.from.id);
   if (!cartItems.length) return ctx.reply('Корзина пуста.');
 
-  // Check availability
-  for (const item of cartItems) {
-    if (item.quantity > item.available_qty) {
-      return ctx.reply(`"${item.name}" — доступно только ${item.available_qty} порций. Уменьшите количество.`);
-    }
-  }
-
-  // Create order
-  const orderId = Order.create(ctx.from.id, locationId, null);
+  const orderId = await Order.create(ctx.from.id, locationId, null);
 
   for (const item of cartItems) {
-    Order.addItem(orderId, item.daily_menu_id, item.quantity, item.price);
-    Menu.decrementQty(item.daily_menu_id, item.quantity);
+    await Order.addItem(orderId, item.menu_item_id, item.quantity, item.price);
   }
 
-  Order.updateTotal(orderId);
-  Cart.clear(ctx.from.id);
+  await Order.updateTotal(orderId);
+  await Cart.clear(ctx.from.id);
 
-  const order = Order.getWithItems(orderId);
-  const location = Location.getById(locationId);
+  const order = await Order.getWithItems(orderId);
+  const location = await Location.getById(locationId);
 
   let text = `<b>Заказ #${orderId}</b>\n\n`;
   order.items.forEach(item => {
@@ -188,11 +176,11 @@ function processOrder(ctx, bot, locationId) {
   });
 }
 
-function notifyCook(ctx, bot, order) {
+async function notifyCook(ctx, bot, order) {
   const cookChatId = process.env.COOK_CHAT_ID;
   if (!cookChatId) return;
 
-  let text = `🍳 <b>НОВЫЙ ЗАКАЗ #${order.id}</b>\n\n`;
+  let text = `<b>НОВЫЙ ЗАКАЗ #${order.id}</b>\n\n`;
   text += `Клиент: ${order.first_name || ''} ${order.last_name || ''}`;
   if (order.username) text += ` (@${order.username})`;
   if (order.phone) text += `\nТел: ${order.phone}`;
@@ -200,7 +188,7 @@ function notifyCook(ctx, bot, order) {
   text += `\n\nБлюда:\n`;
 
   order.items.forEach(item => {
-    text += `  • ${item.name} x${item.quantity}\n`;
+    text += `  - ${item.name} x${item.quantity}\n`;
   });
 
   text += `\n<b>Итого: ${formatPrice(order.total)}</b>`;
@@ -212,7 +200,7 @@ function notifyCook(ctx, bot, order) {
       [Markup.button.callback('Готово', `cook_ready_${order.id}`)],
       [Markup.button.callback('Доставлено', `cook_delivered_${order.id}`)]
     ])
-  });
+  }).catch(() => {});
 }
 
 module.exports = { setupCartHandler };

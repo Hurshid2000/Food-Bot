@@ -1,14 +1,14 @@
 const User = require('../models/user');
 
 function authMiddleware() {
-  return (ctx, next) => {
+  return async (ctx, next) => {
     if (!ctx.from) return;
-    const user = User.findOrCreate(ctx.from);
+    const user = await User.findOrCreate(ctx.from);
     ctx.state.user = user;
 
     // Auto-assign super_admin
     if (String(ctx.from.id) === String(process.env.SUPER_ADMIN_ID) && user.role !== 'super_admin') {
-      User.setRole(ctx.from.id, 'super_admin');
+      await User.setRole(ctx.from.id, 'super_admin');
       ctx.state.user.role = 'super_admin';
     }
 

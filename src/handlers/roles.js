@@ -1,7 +1,7 @@
 const { Markup } = require('telegraf');
 const User = require('../models/user');
 const { isSuperAdmin } = require('../middleware/auth');
-const { mainKeyboard } = require('../keyboards/main');
+const { mainKeyboard, adminPanelKeyboard } = require('../keyboards/main');
 
 function setupRolesHandler(bot) {
   bot.hears('Управление ролями', (ctx) => {
@@ -15,23 +15,23 @@ function setupRolesHandler(bot) {
     ]));
   });
 
-  bot.action('role_list', (ctx) => {
+  bot.action('role_list', async (ctx) => {
     if (!isSuperAdmin(ctx)) return;
-    const admins = User.getAllAdmins();
-    const cooks = User.getAllCooks();
+    const admins = await User.getAllAdmins();
+    const cooks = await User.getAllCooks();
 
-    let text = 'Админы:\n';
+    let text = '<b>Роли:</b>\n\n<b>Админы:</b>\n';
     admins.forEach(a => {
       text += `  - ${a.first_name || ''} ${a.last_name || ''} (@${a.username || 'нет'}) [${a.role}]\n`;
     });
-    text += '\nПовара:\n';
+    text += '\n<b>Повара:</b>\n';
     cooks.forEach(c => {
       text += `  - ${c.first_name || ''} ${c.last_name || ''} (@${c.username || 'нет'})\n`;
     });
 
-    if (!admins.length && !cooks.length) text = 'Пока нет назначенных ролей.';
+    if (!admins.length && !cooks.length) text = 'Пока нет назначенных ролей (кроме вас).';
     ctx.answerCbQuery();
-    ctx.reply(text);
+    ctx.reply(text, { parse_mode: 'HTML' });
   });
 
   for (const role of ['admin', 'cook', 'user']) {
@@ -42,13 +42,12 @@ function setupRolesHandler(bot) {
         `Перешлите сообщение от пользователя, которому хотите ${role === 'user' ? 'снять роль' : `назначить роль "${role}"`}, или введите его Telegram ID:`,
         Markup.forceReply()
       );
-      ctx.state.user._pendingRoleAction = role;
       bot.context = bot.context || {};
       bot.context[ctx.from.id] = { action: 'set_role', role };
     });
   }
 
-  bot.on('message', (ctx, next) => {
+  bot.on('message', async (ctx, next) => {
     if (!isSuperAdmin(ctx)) return next();
 
     const pending = bot.context?.[ctx.from.id];
@@ -63,7 +62,7 @@ function setupRolesHandler(bot) {
       return next();
     }
 
-    const targetUser = User.findByTelegramId(targetId);
+    const targetUser = await User.findByTelegramId(targetId);
     if (!targetUser) {
       ctx.reply('Пользователь не найден. Он должен сначала запустить бота.');
       delete bot.context[ctx.from.id];
@@ -76,11 +75,11 @@ function setupRolesHandler(bot) {
       return;
     }
 
-    User.setRole(targetId, pending.role);
+    await User.setRole(targetId, pending.role);
     const roleNames = { admin: 'Админ', cook: 'Повар', user: 'Пользователь' };
     ctx.reply(
       `Роль "${roleNames[pending.role]}" назначена пользователю ${targetUser.first_name || ''} (@${targetUser.username || 'нет'}).`,
-      mainKeyboard(ctx.state.user.role)
+      adminPanelKeyboard(ctx.state.user.role)
     );
     delete bot.context[ctx.from.id];
   });
