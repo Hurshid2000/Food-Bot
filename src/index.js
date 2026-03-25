@@ -47,9 +47,21 @@ async function main() {
     console.log(`Auto-completed ${result.changes} old order(s).`);
   }
 
-  // Launch
-  await bot.launch({ dropPendingUpdates: true });
-  console.log('Bot started!');
+  // Launch with retry (handles 409 conflict during redeploy)
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await bot.launch({ dropPendingUpdates: true });
+      console.log('Bot started!');
+      break;
+    } catch (err) {
+      if (err.response?.error_code === 409 && attempt < 5) {
+        console.log(`Attempt ${attempt}: another instance still running, retrying in 3s...`);
+        await new Promise(r => setTimeout(r, 3000));
+      } else {
+        throw err;
+      }
+    }
+  }
 
   // Graceful shutdown
   process.once('SIGINT', () => bot.stop('SIGINT'));
